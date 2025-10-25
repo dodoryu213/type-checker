@@ -1,0 +1,572 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>タイプ相性チェッカー（メガ対応・3匹弱点チェック）</title>
+<style>
+  :root{
+    --bg:#0f1115; --panel:#141820; --muted:#9aa3b2; --text:#e6edf3; --accent:#4f8cff;
+    --weak:#ff6b6b; --strong:#74c0fc; --immune:#222; --neutral:#3a3f4b;
+    --chip:#1f2430; --chip-on:#2a3242; --border:#252a36;
+  }
+  html,body{background:var(--bg); color:var(--text); font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,"Noto Sans JP","Hiragino Sans",Meiryo,sans-serif; margin:0}
+  .wrap{max-width:1100px; margin:24px auto; padding:0 16px}
+  h1{font-size:24px; margin:0 0 8px}
+  h2{font-size:18px; margin:0 0 8px}
+  .sub{color:var(--muted); margin-bottom:20px}
+  .card{background:var(--panel); border:1px solid var(--border); border-radius:14px; padding:16px; margin:16px 0}
+  .row{display:flex; gap:12px; flex-wrap:wrap; align-items:center}
+  .type-grid{display:grid; grid-template-columns:repeat(auto-fill,minmax(92px,1fr)); gap:8px}
+  .type-chip{user-select:none; padding:10px 12px; text-align:center; border-radius:10px; background:var(--chip); border:1px solid var(--border); cursor:pointer; font-weight:600; letter-spacing:.2px}
+  .type-chip[aria-pressed="true"]{background:var(--chip-on); outline:2px solid var(--accent)}
+  .legend{display:flex; gap:8px; flex-wrap:wrap}
+  .badge{padding:6px 10px; border-radius:999px; font-weight:700; border:1px solid var(--border)}
+  .b-imm{background:var(--immune)}
+  .b-x4{background:var(--weak)}
+  .b-x2{background:color-mix(in hsl, var(--weak) 70%, black)}
+  .b-x1{background:var(--neutral)}
+  .b-x05{background:var(--strong)}
+  .b-x025{background:color-mix(in hsl, var(--strong) 70%, black)}
+  .grid-out{display:grid; grid-template-columns:repeat(auto-fill,minmax(140px,1fr)); gap:8px; margin-top:10px}
+  .pill{background:#1a1f2b; border:1px solid var(--border); padding:10px 12px; border-radius:10px; display:flex; justify-content:space-between; gap:8px}
+  .muted{color:var(--muted)}
+  .small{font-size:12px}
+  .divider{height:1px; background:var(--border); margin:8px 0 12px}
+  .result{font-size:18px; font-weight:800}
+  .mono{font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono"}
+  .footer{color:var(--muted); font-size:12px; margin-top:16px}
+  select,input[type="search"]{background:#0f141d; color:var(--text); border:1px solid var(--border); border-radius:10px; padding:10px 12px}
+  .formline{display:flex; gap:8px; flex-wrap:wrap; align-items:center}
+  .btn{background:var(--chip); border:1px solid var(--border); border-radius:10px; padding:10px 12px; cursor:pointer}
+  .btn[disabled]{opacity:.5; cursor:not-allowed}
+  .slot{display:grid; grid-template-columns:1fr auto; gap:8px; align-items:center}
+  .slotline{display:flex; gap:8px; flex-wrap:wrap; align-items:center}
+  .tag{font-size:11px; padding:2px 8px; border-radius:999px; border:1px solid var(--border); background:#1a2030}
+  table{border-collapse:collapse; width:100%; background:#0f141d; border:1px solid var(--border); border-radius:12px; overflow:hidden}
+  th,td{padding:8px; border-bottom:1px solid var(--border); text-align:left}
+  th{background:#0d121a}
+  tr:last-child td{border-bottom:none}
+  .hi{font-weight:800}
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>タイプ相性チェッカー（メガ対応・3匹弱点チェック）</h1>
+    <div class="sub">3匹を選んで、相手の攻撃タイプに対する<strong>弱点タイプ</strong>と<strong>チーム耐性サマリ</strong>を確認。特性・テラスタルは未考慮。</div>
+
+    <!-- 3匹 弱点チェック -->
+    <div class="card">
+      <h2>3匹の弱点チェック（メガボタンで形態切替）</h2>
+      <div class="small muted">※ メガ形態が複数（X/Yなど）の場合、<b>通常 → X → Y → 通常</b> とボタンで循環します。</div>
+
+      <div id="slots"></div>
+
+      <div class="divider"></div>
+      <h3>弱点タイプ一覧（誰が弱いか）</h3>
+      <div id="team-weak-list" class="grid-out"></div>
+
+      <div class="divider"></div>
+      <h3>チーム耐性サマリ（各攻撃タイプに対する人数内訳）</h3>
+      <div class="small muted">行＝攻撃タイプ / 列＝×0, ×0.25, ×0.5, ×1, ×2, ×4 の人数</div>
+      <div id="team-summary"></div>
+    </div>
+
+    <!-- 既存の個別チェッカー（防御/攻撃） -->
+    <div class="card" id="def-card">
+      <h2>防御側の相性（自分/相手のタイプ → 受けるダメージ）</h2>
+      <div class="type-grid" id="def-types"></div>
+      <div class="divider"></div>
+      <div class="legend">
+        <span class="badge b-imm">無効 ×0</span>
+        <span class="badge b-x025">激減 ×0.25</span>
+        <span class="badge b-x05">半減 ×0.5</span>
+        <span class="badge b-x1">等倍 ×1</span>
+        <span class="badge b-x2">弱点 ×2</span>
+        <span class="badge b-x4">大弱点 ×4</span>
+      </div>
+      <div id="def-output" class="grid-out"></div>
+    </div>
+
+    <div class="card" id="atk-card">
+      <h2>攻撃側の相性（自分の技タイプ → 相手タイプ）</h2>
+      <div class="row small muted">技タイプ（最大2つ。2つ選ぶと有利な方で計算）</div>
+      <div class="type-grid" id="atk-types"></div>
+      <div class="row small muted" style="margin-top:6px">相手タイプ（最大2つ）</div>
+      <div class="type-grid" id="opp-types"></div>
+      <div class="divider"></div>
+      <div id="atk-output" class="result">倍率：<span class="mono" id="atk-mult">—</span></div>
+      <div class="small muted">※ STAB/特性/天候/フィールド/テラスタルは未考慮。</div>
+    </div>
+
+    <div class="footer">© 相性は現行（フェアリー導入後）。メガのタイプは従来作の設定に基づく（Z-Aで変更があれば更新）。</div>
+  </div>
+
+<script>
+/* ===== タイプ定義・相性表（Gen6+準拠） ===== */
+const TYPES = [
+  "ノーマル","ほのお","みず","でんき","くさ","こおり","かくとう","どく","じめん",
+  "ひこう","エスパー","むし","いわ","ゴースト","ドラゴン","あく","はがね","フェアリー"
+];
+
+const CHART = {
+  "ノーマル":   {"いわ":0.5,"ゴースト":0,"はがね":0.5},
+  "ほのお":     {"ほのお":0.5,"みず":0.5,"くさ":2,"こおり":2,"むし":2,"いわ":0.5,"ドラゴン":0.5,"はがね":2},
+  "みず":       {"ほのお":2,"みず":0.5,"くさ":0.5,"じめん":2,"いわ":2,"ドラゴン":0.5},
+  "でんき":     {"みず":2,"でんき":0.5,"くさ":0.5,"じめん":0,"ひこう":2,"ドラゴン":0.5},
+  "くさ":       {"ほのお":0.5,"みず":2,"くさ":0.5,"どく":0.5,"じめん":2,"ひこう":0.5,"むし":0.5,"いわ":2,"ドラゴン":0.5,"はがね":0.5},
+  "こおり":     {"ほのお":0.5,"みず":0.5,"くさ":2,"じめん":2,"ひこう":2,"ドラゴン":2,"はがね":0.5},
+  "かくとう":   {"ノーマル":2,"こおり":2,"どく":0.5,"ひこう":0.5,"エスパー":0.5,"むし":0.5,"いわ":2,"ゴースト":0,"あく":2,"はがね":2,"フェアリー":0.5},
+  "どく":       {"くさ":2,"どく":0.5,"じめん":0.5,"いわ":0.5,"ゴースト":0.5,"はがね":0,"フェアリー":2},
+  "じめん":     {"ほのお":2,"でんき":2,"くさ":0.5,"どく":2,"ひこう":0,"むし":0.5,"いわ":2,"はがね":2},
+  "ひこう":     {"でんき":0.5,"くさ":2,"かくとう":2,"むし":2,"いわ":0.5,"はがね":0.5},
+  "エスパー":   {"かくとう":2,"どく":2,"エスパー":0.5,"あく":0,"はがね":0.5},
+  "むし":       {"ほのお":0.5,"くさ":2,"かくとう":0.5,"どく":0.5,"ひこう":0.5,"エスパー":2,"ゴースト":0.5,"あく":2,"はがね":0.5,"フェアリー":0.5},
+  "いわ":       {"ほのお":2,"こおり":2,"かくとう":0.5,"じめん":0.5,"ひこう":2,"むし":2,"はがね":0.5},
+  "ゴースト":   {"ノーマル":0,"エスパー":2,"ゴースト":2,"あく":0.5},
+  "ドラゴン":   {"ドラゴン":2,"はがね":0.5,"フェアリー":0},
+  "あく":       {"かくとう":0.5,"エスパー":2,"ゴースト":2,"あく":0.5,"フェアリー":0.5},
+  "はがね":     {"ほのお":0.5,"みず":0.5,"でんき":0.5,"こおり":2,"いわ":2,"フェアリー":2,"はがね":0.5},
+  "フェアリー": {"ほのお":0.5,"かくとう":2,"どく":0.5,"ドラゴン":2,"あく":2,"はがね":0.5}
+};
+
+const getMult = (atk, def) => (CHART[atk] && CHART[atk][def]) ?? 1;
+
+/* ===== 種族→タイプ辞書（通常/メガ） =====
+   - 代表的な通常形＋全メガ形態を収録（必要に応じて追加可能）
+   - 表記：「◯◯(メガ)」「◯◯(メガX)」「◯◯(メガY)」
+*/
+const SPECIES_TYPES = {
+  "フシギバナ": ["くさ","どく"],
+  "リザードン": ["ほのお","ひこう"],
+  "カメックス": ["みず"],
+  "ゲンガー": ["ゴースト","どく"],
+  "ギャラドス": ["みず","ひこう"],
+  "プテラ": ["いわ","ひこう"],
+  "ミュウツー": ["エスパー"],
+  "デンリュウ": ["でんき"],
+  "ハガネール": ["はがね","じめん"],
+  "ハッサム": ["むし","はがね"],
+  "ヘラクロス": ["むし","かくとう"],
+  "ヘルガー": ["あく","ほのお"],
+  "バンギラス": ["いわ","あく"],
+  "ジュカイン": ["くさ"],
+  "バシャーモ": ["ほのお","かくとう"],
+  "ラグラージ": ["みず","じめん"],
+  "サーナイト": ["エスパー","フェアリー"],
+  "クチート": ["はがね","フェアリー"],
+  "ボスゴドラ": ["いわ","はがね"],
+  "チャーレム": ["かくとう","エスパー"],
+  "ライボルト": ["でんき"],
+  "サメハダー": ["みず","あく"],
+  "バクーダ": ["ほのお","じめん"],
+  "チルタリス": ["ノーマル","ひこう"],
+  "ジュペッタ": ["ゴースト"],
+  "アブソル": ["あく"],
+  "オニゴーリ": ["こおり"],
+  "ボーマンダ": ["ドラゴン","ひこう"],
+  "メタグロス": ["はがね","エスパー"],
+  "ラティアス": ["ドラゴン","エスパー"],
+  "ラティオス": ["ドラゴン","エスパー"],
+  "レックウザ": ["ドラゴン","ひこう"],
+  "ミミロップ": ["ノーマル"],
+  "ガブリアス": ["ドラゴン","じめん"],
+  "ルカリオ": ["かくとう","はがね"],
+  "ユキノオー": ["くさ","こおり"],
+  "エルレイド": ["エスパー","かくとう"],
+  "タブンネ": ["ノーマル"],
+
+  /* メガ形態 */
+  "フシギバナ(メガ)": ["くさ","どく"],
+  "リザードン(メガX)": ["ほのお","ドラゴン"],
+  "リザードン(メガY)": ["ほのお","ひこう"],
+  "カメックス(メガ)": ["みず"],
+  "スピアー(メガ)": ["むし","どく"],
+  "ピジョット(メガ)": ["ノーマル","ひこう"],
+  "フーディン(メガ)": ["エスパー"],
+  "ヤドラン(メガ)": ["みず","エスパー"],
+  "ゲンガー(メガ)": ["ゴースト","どく"],
+  "ガルーラ(メガ)": ["ノーマル"],
+  "カイロス(メガ)": ["むし","ひこう"],
+  "ギャラドス(メガ)": ["みず","あく"],
+  "プテラ(メガ)": ["いわ","ひこう"],
+  "ミュウツー(メガX)": ["エスパー","かくとう"],
+  "ミュウツー(メガY)": ["エスパー"],
+  "デンリュウ(メガ)": ["でんき","ドラゴン"],
+  "ハガネール(メガ)": ["はがね","じめん"],
+  "ハッサム(メガ)": ["むし","はがね"],
+  "ヘラクロス(メガ)": ["むし","かくとう"],
+  "ヘルガー(メガ)": ["あく","ほのお"],
+  "バンギラス(メガ)": ["いわ","あく"],
+  "ジュカイン(メガ)": ["くさ","ドラゴン"],
+  "バシャーモ(メガ)": ["ほのお","かくとう"],
+  "ラグラージ(メガ)": ["みず","じめん"],
+  "サーナイト(メガ)": ["エスパー","フェアリー"],
+  "クチート(メガ)": ["はがね","フェアリー"],
+  "ボスゴドラ(メガ)": ["はがね"],
+  "チャーレム(メガ)": ["かくとう","エスパー"],
+  "ライボルト(メガ)": ["でんき"],
+  "サメハダー(メガ)": ["みず","あく"],
+  "バクーダ(メガ)": ["ほのお","じめん"],
+  "チルタリス(メガ)": ["ドラゴン","フェアリー"],
+  "ジュペッタ(メガ)": ["ゴースト"],
+  "アブソル(メガ)": ["あく"],
+  "オニゴーリ(メガ)": ["こおり"],
+  "ボーマンダ(メガ)": ["ドラゴン","ひこう"],
+  "メタグロス(メガ)": ["はがね","エスパー"],
+  "ラティアス(メガ)": ["ドラゴン","エスパー"],
+  "ラティオス(メガ)": ["ドラゴン","エスパー"],
+  "レックウザ(メガ)": ["ドラゴン","ひこう"],
+  "ミミロップ(メガ)": ["ノーマル","かくとう"],
+  "ガブリアス(メガ)": ["ドラゴン","じめん"],
+  "ルカリオ(メガ)": ["かくとう","はがね"],
+  "ユキノオー(メガ)": ["くさ","こおり"],
+  "エルレイド(メガ)": ["エスパー","かくとう"],
+  "タブンネ(メガ)": ["ノーマル","フェアリー"],
+  "ディアンシー(メガ)": ["いわ","フェアリー"]
+};
+
+/* ベース名 → メガ候補一覧（循環用） */
+const MEGA_VARIANTS = {
+  "リザードン": ["リザードン(メガX)","リザードン(メガY)"],
+  "ミュウツー": ["ミュウツー(メガX)","ミュウツー(メガY)"],
+  "フシギバナ": ["フシギバナ(メガ)"],
+  "カメックス": ["カメックス(メガ)"],
+  "スピアー": ["スピアー(メガ)"],
+  "ピジョット": ["ピジョット(メガ)"],
+  "フーディン": ["フーディン(メガ)"],
+  "ヤドラン": ["ヤドラン(メガ)"],
+  "ゲンガー": ["ゲンガー(メガ)"],
+  "ガルーラ": ["ガルーラ(メガ)"],
+  "カイロス": ["カイロス(メガ)"],
+  "ギャラドス": ["ギャラドス(メガ)"],
+  "プテラ": ["プテラ(メガ)"],
+  "デンリュウ": ["デンリュウ(メガ)"],
+  "ハガネール": ["ハガネール(メガ)"],
+  "ハッサム": ["ハッサム(メガ)"],
+  "ヘラクロス": ["ヘラクロス(メガ)"],
+  "ヘルガー": ["ヘルガー(メガ)"],
+  "バンギラス": ["バンギラス(メガ)"],
+  "ジュカイン": ["ジュカイン(メガ)"],
+  "バシャーモ": ["バシャーモ(メガ)"],
+  "ラグラージ": ["ラグラージ(メガ)"],
+  "サーナイト": ["サーナイト(メガ)"],
+  "クチート": ["クチート(メガ)"],
+  "ボスゴドラ": ["ボスゴドラ(メガ)"],
+  "チャーレム": ["チャーレム(メガ)"],
+  "ライボルト": ["ライボルト(メガ)"],
+  "サメハダー": ["サメハダー(メガ)"],
+  "バクーダ": ["バクーダ(メガ)"],
+  "チルタリス": ["チルタリス(メガ)"],
+  "ジュペッタ": ["ジュペッタ(メガ)"],
+  "アブソル": ["アブソル(メガ)"],
+  "オニゴーリ": ["オニゴーリ(メガ)"],
+  "ボーマンダ": ["ボーマンダ(メガ)"],
+  "メタグロス": ["メタグロス(メガ)"],
+  "ラティアス": ["ラティアス(メガ)"],
+  "ラティオス": ["ラティオス(メガ)"],
+  "レックウザ": ["レックウザ(メガ)"],
+  "ミミロップ": ["ミミロップ(メガ)"],
+  "ガブリアス": ["ガブリアス(メガ)"],
+  "ルカリオ": ["ルカリオ(メガ)"],
+  "ユキノオー": ["ユキノオー(メガ)"],
+  "エルレイド": ["エルレイド(メガ)"],
+  "タブンネ": ["タブンネ(メガ)"],
+  "ディアンシー": ["ディアンシー(メガ)"]
+};
+
+/* ===== 3スロットUI ===== */
+const buildSpeciesOptions = () => Object.keys(SPECIES_TYPES).filter(n=>!n.includes("(メガ")).sort((a,b)=>a.localeCompare(b,'ja'));
+const filterOptions = (q) => {
+  const all = buildSpeciesOptions();
+  if(!q) return all;
+  const k = q.toLowerCase();
+  return all.filter(n => n.toLowerCase().includes(k));
+};
+
+function slotTemplate(i){
+  return `
+    <div class="card" style="padding:12px; margin:12px 0">
+      <div class="slotline">
+        <span class="tag">スロット${i+1}</span>
+        <input class="s${i}-search" type="search" placeholder="例: リザードン / ガブリアス..." />
+        <select class="s${i}-select"></select>
+        <button class="btn s${i}-mega">メガ：OFF</button>
+        <span class="small muted s${i}-formtag">（通常形態）</span>
+      </div>
+      <div class="small muted" style="margin-top:6px">現在タイプ：<span class="mono s${i}-types">—</span></div>
+    </div>
+  `;
+}
+
+const SLOT_STATE = [null,null,null].map(()=>({
+  baseName: null,
+  formIndex: -1,
+  currentName: null,
+  types: []
+}));
+
+function updateSlotTypes(idx){
+  const st = SLOT_STATE[idx];
+  if(!st.currentName){ setSlotLabel(idx,"—"); return; }
+  const types = SPECIES_TYPES[st.currentName] || [];
+  st.types = types;
+  setSlotLabel(idx, types.length? types.join(" / ") : "—");
+}
+
+function setSlotLabel(idx, text){
+  document.querySelector(`.s${idx}-types`).textContent = text;
+}
+
+function toggleMega(idx){
+  const st = SLOT_STATE[idx];
+  if(!st.baseName) return;
+  const variants = MEGA_VARIANTS[st.baseName] || [];
+  if(variants.length===0){
+    alert("このポケモンにはメガ形態がありません。");
+    return;
+  }
+  st.formIndex = (st.formIndex + 1) % (variants.length + 1);
+  if(st.formIndex === variants.length){
+    st.currentName = st.baseName;
+    document.querySelector(`.s${idx}-mega`).textContent = "メガ：OFF";
+    document.querySelector(`.s${idx}-formtag`).textContent = "（通常形態）";
+  }else{
+    st.currentName = variants[st.formIndex];
+    document.querySelector(`.s${idx}-mega`).textContent = "メガ：ON";
+    document.querySelector(`.s${idx}-formtag`).textContent = `（${st.currentName.replace(st.baseName,"").replace(/[()]/g,"")}）`;
+  }
+  updateSlotTypes(idx);
+  recomputeTeam();
+}
+
+function initSlots(){
+  const container = document.getElementById('slots');
+  container.innerHTML = "";
+  for(let i=0;i<3;i++) container.insertAdjacentHTML('beforeend', slotTemplate(i));
+
+  for(let i=0;i<3;i++){
+    const sel = document.querySelector(`.s${i}-select`);
+    const inp = document.querySelector(`.s${i}-search`);
+    const btn = document.querySelector(`.s${i}-mega`);
+
+    const fill = (opts) => {
+      sel.innerHTML = "";
+      opts.forEach(n=>{
+        const op = document.createElement('option');
+        op.value = n; op.textContent = n;
+        sel.appendChild(op);
+      });
+    };
+    fill(buildSpeciesOptions());
+    inp.addEventListener('input', ()=> fill(filterOptions(inp.value)));
+
+    sel.addEventListener('change', ()=>{
+      SLOT_STATE[i].baseName = sel.value;
+      SLOT_STATE[i].formIndex = -1;
+      SLOT_STATE[i].currentName = sel.value;
+      btn.textContent = "メガ：OFF";
+      document.querySelector(`.s${i}-formtag`).textContent = "（通常形態）";
+      updateSlotTypes(i);
+      recomputeTeam();
+    });
+
+    sel.dispatchEvent(new Event('change'));
+    btn.addEventListener('click', ()=> toggleMega(i));
+  }
+}
+
+/* ===== チーム計算 ===== */
+function productMultiplier(types, atkType){
+  return (types && types.length)
+    ? types.reduce((m, d)=> m * getMult(atkType, d), 1)
+    : 1;
+}
+
+function renderWeakList(){
+  const out = document.getElementById('team-weak-list');
+  out.innerHTML = "";
+  const team = SLOT_STATE.map(s=> ({ name: s.currentName, types: s.types })).filter(s=> !!s.name);
+
+  const rows = [];
+  TYPES.forEach(atk=>{
+    const details = team.map(p=>{
+      const mult = productMultiplier(p.types, atk);
+      return { name:p.name, mult };
+    });
+    const weaks = details.filter(d=> d.mult>1);
+    if(weaks.length>0){
+      weaks.sort((a,b)=> b.mult-a.mult || a.name.localeCompare(b.name,'ja'));
+      rows.push({ atk, weaks });
+    }
+  });
+
+  if(rows.length===0){
+    out.innerHTML = '<div class="muted">弱点タイプは現在ありません（全て等倍以下）。</div>';
+    return;
+  }
+
+  rows.forEach(r=>{
+    const text = r.weaks.map(w=> `${w.name} ×${w.mult}`).join(' / ');
+    const div = document.createElement('div');
+    div.className = 'pill';
+    div.innerHTML = `<span class="hi">${r.atk}</span><span>${text}</span>`;
+    out.appendChild(div);
+  });
+}
+
+function renderSummary(){
+  const mount = document.getElementById('team-summary');
+  mount.innerHTML = "";
+  const team = SLOT_STATE.map(s=> ({ name: s.currentName, types: s.types })).filter(s=> !!s.name);
+  if(team.length===0){
+    mount.innerHTML = '<div class="muted">ポケモンを選択してください。</div>';
+    return;
+  }
+
+  const header = ["タイプ","×0","×0.25","×0.5","×1","×2","×4"];
+  const table = document.createElement('table');
+  const thead = document.createElement('thead');
+  const trh = document.createElement('tr');
+  header.forEach(h=>{ const th=document.createElement('th'); th.textContent=h; trh.appendChild(th); });
+  thead.appendChild(trh);
+  table.appendChild(thead);
+
+  const tbody = document.createElement('tbody');
+  TYPES.forEach(atk=>{
+    const counts = {0:0,0.25:0,0.5:0,1:0,2:0,4:0};
+    team.forEach(p=>{
+      const mult = productMultiplier(p.types, atk);
+      const r = Math.round(mult*100)/100;
+      const key = [0,0.25,0.5,1,2,4].find(v=>Math.abs(r-v)<1e-9) ?? r;
+      if(counts[key]===undefined) counts[key]=0;
+      counts[key]++;
+    });
+    const tr = document.createElement('tr');
+    const cells = [
+      atk,
+      counts[0]||0,
+      counts[0.25]||0,
+      counts[0.5]||0,
+      counts[1]||0,
+      counts[2]||0,
+      counts[4]||0
+    ];
+    cells.forEach((c,ix)=>{
+      const td = document.createElement('td');
+      td.textContent = c;
+      if(ix>0 && c>0 && ix>=5){ td.style.fontWeight='800'; }
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  mount.appendChild(table);
+}
+
+function recomputeTeam(){
+  renderWeakList();
+  renderSummary();
+}
+
+/* ===== 既存：個別チェッカーUI ===== */
+const clamp2 = (arr) => arr.slice(0,2);
+const selected = (container) =>
+  [...container.querySelectorAll('.type-chip[aria-pressed="true"]')].map(x=>x.dataset.type);
+
+function renderTypeButtons(container, onChange){
+  container.innerHTML = '';
+  TYPES.forEach(t=>{
+    const b = document.createElement('button');
+    b.className = 'type-chip';
+    b.type='button';
+    b.textContent = t;
+    b.dataset.type = t;
+    b.setAttribute('aria-pressed','false');
+    b.onclick = () => {
+      const pressed = container.querySelectorAll('.type-chip[aria-pressed="true"]');
+      const isOn = b.getAttribute('aria-pressed')==='true';
+      if(!isOn && pressed.length>=2){ pressed[0].setAttribute('aria-pressed','false'); }
+      b.setAttribute('aria-pressed', String(!isOn));
+      onChange(selected(container));
+    };
+    container.appendChild(b);
+  });
+}
+function setTypes(container, types){
+  container.querySelectorAll('.type-chip').forEach(btn=>btn.setAttribute('aria-pressed','false'));
+  clamp2(types).forEach(t=>{
+    const el = container.querySelector(`.type-chip[data-type="${t}"]`);
+    if(el) el.setAttribute('aria-pressed','true');
+  });
+}
+
+function updateDefense(defTypes){
+  const out = document.getElementById('def-output');
+  out.innerHTML = '';
+  const entries = TYPES.map(atk=>{
+    const mult = defTypes.reduce((m,d)=> m * getMult(atk,d), 1);
+    return {atk, mult};
+  }).sort((a,b)=> a.mult===b.mult ? a.atk.localeCompare(b.atk,'ja') : b.mult-a.mult);
+
+  const buckets = [
+    {label:"×4", val:4, cls:"b-x4"},
+    {label:"×2", val:2, cls:"b-x2"},
+    {label:"×1", val:1, cls:"b-x1"},
+    {label:"×0.5", val:0.5, cls:"b-x05"},
+    {label:"×0.25", val:0.25, cls:"b-x025"},
+    {label:"×0", val:0, cls:"b-imm"},
+  ];
+  const roundMult = (x)=> {
+    const r = Math.round(x*100)/100;
+    return [4,2,1,0.5,0.25,0].find(v=>Math.abs(r-v)<1e-9) ?? r;
+  };
+
+  let any=false;
+  buckets.forEach(b=>{
+    const list = entries.filter(e=> roundMult(e.mult)===b.val);
+    list.forEach(e=>{
+      any=true;
+      const d = document.createElement('div');
+      d.className = 'pill';
+      d.innerHTML = `<span>${e.atk}</span><span class="badge ${b.cls}">${b.label}</span>`;
+      out.appendChild(d);
+    });
+  });
+
+  if(!any){
+    out.innerHTML = '<div class="muted">タイプを1〜2つ選ぶと、弱点/耐性が表示されます。</div>';
+  }
+}
+
+function updateAttack(atkTypes, oppTypes){
+  const el = document.getElementById('atk-mult');
+  if(oppTypes.length===0){ el.textContent='—'; return; }
+  if(atkTypes.length===0){ el.textContent='—（技タイプを選択）'; return; }
+  const best = Math.max(...atkTypes.map(a=> oppTypes.reduce((m,d)=> m * getMult(a,d), 1)));
+  const pretty = (x)=>{
+    const map = {4:"4",2:"2",1:"1","0.5":"0.5","0.25":"0.25","0":"0"};
+    const r = Math.round(x*100)/100;
+    const key = Object.keys(map).find(k=>Math.abs(r-Number(k))<1e-9);
+    return key ?? r.toString();
+  };
+  el.textContent = pretty(best) + " 倍";
+}
+
+(function init(){
+  initSlots();
+
+  const defBox = document.getElementById('def-types');
+  const atkBox = document.getElementById('atk-types');
+  const oppBox = document.getElementById('opp-types');
+
+  renderTypeButtons(defBox, defs=> updateDefense(clamp2(defs)));
+  renderTypeButtons(atkBox, ()=> updateAttack(clamp2(selected(atkBox)), clamp2(selected(oppBox))));
+  renderTypeButtons(oppBox, ()=> updateAttack(clamp2(selected(atkBox)), clamp2(selected(oppBox))));
+
+  updateDefense([]);
+  updateAttack([],[]);
+})();
+</script>
+</body>
+</html>
